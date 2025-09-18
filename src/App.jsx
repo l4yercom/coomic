@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signOut, signInAnonymously, signInWithCustomToken, signInWithEmailAndPassword } from 'firebase/auth';
-import { 
-    getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, 
-    collection, query, where, getDocs, writeBatch
+import {
+    getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot,
+    collection, query, where, getDocs, writeBatch, orderBy, limit
 } from 'firebase/firestore';
 
 // --- Helper: Icon Component ---
@@ -225,6 +225,218 @@ const Modal = ({ isOpen, onClose, title, children }) => {
 
 
 // --- Pages/Views ---
+
+// 1. Landing Page (Featured Episodes)
+const LandingPage = ({ user, onSelectEpisode, onGoToDashboard, onShowLogin }) => {
+    const [featuredEpisodes, setFeaturedEpisodes] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchFeaturedEpisodes = async () => {
+            setLoading(true);
+            try {
+                // Get only featured episodes with their series information
+                const episodesCollectionPath = `/artifacts/${appId}/public/data/episodes`;
+                const episodesQuery = query(
+                    collection(db, episodesCollectionPath),
+                    where("featured", "==", true),
+                    orderBy("createdAt", "desc"),
+                    limit(12)
+                );
+                const episodesSnapshot = await getDocs(episodesQuery);
+
+                const episodesData = await Promise.all(
+                    episodesSnapshot.docs.map(async (episodeDoc) => {
+                        const episode = { id: episodeDoc.id, ...episodeDoc.data() };
+
+                        // Get series information
+                        const seriesDocPath = `/artifacts/${appId}/public/data/series`;
+                        const seriesDoc = await getDoc(doc(db, seriesDocPath, episode.seriesId));
+                        const series = seriesDoc.exists() ? { id: seriesDoc.id, ...seriesDoc.data() } : null;
+
+                        // Get first panel for preview
+                        const panelsCollectionPath = `/artifacts/${appId}/public/data/panels`;
+                        const panelsQuery = query(collection(db, panelsCollectionPath), where("episodeId", "==", episode.id), orderBy("order", "asc"), limit(1));
+                        const panelsSnapshot = await getDocs(panelsQuery);
+                        const firstPanel = panelsSnapshot.docs.length > 0 ? { id: panelsSnapshot.docs[0].id, ...panelsSnapshot.docs[0].data() } : null;
+
+                        return {
+                            ...episode,
+                            series,
+                            previewImage: firstPanel?.imageUrl || null,
+                            createdAt: episode.createdAt?.toDate ? episode.createdAt.toDate() : new Date(0)
+                        };
+                    })
+                );
+
+                setFeaturedEpisodes(episodesData);
+            } catch (error) {
+                console.error("Error fetching featured episodes:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchFeaturedEpisodes();
+    }, []);
+
+    const formatDate = (date) => {
+        return date.toLocaleDateString('es-ES', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+    };
+
+    if (loading) return <div className="p-8"><LoadingSpinner /></div>;
+
+    return (
+        <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+            {/* Header */}
+            <header className="bg-white shadow-sm border-b">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="flex justify-between items-center py-6">
+                        <div className="flex items-center">
+                            <Icon name="book" className="w-8 h-8 text-indigo-600 mr-3" />
+                            <h1 className="text-3xl font-bold text-gray-900">Coomic</h1>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            {user ? (
+                                <button
+                                    onClick={onGoToDashboard}
+                                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
+                                >
+                                    <Icon name="user" className="w-5 h-5" />
+                                    Mi Dashboard
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={onShowLogin}
+                                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition"
+                                >
+                                    Iniciar Sesión
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            {/* Hero Section */}
+            <section className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-20">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                    <h2 className="text-5xl font-bold mb-6">Descubre Historias Increíbles</h2>
+                    <p className="text-xl mb-8 text-indigo-100 max-w-2xl mx-auto">
+                        Explora los últimos episodios de cómics creados con IA. Historias únicas, personajes fascinantes y arte generado automáticamente.
+                    </p>
+                    <div className="flex justify-center gap-4">
+                        <Icon name="wand" className="w-6 h-6" />
+                        <span className="text-lg">Creado con Inteligencia Artificial</span>
+                    </div>
+                </div>
+            </section>
+
+            {/* Featured Episodes */}
+            <section className="py-16">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="text-center mb-12">
+                        <h3 className="text-3xl font-bold text-gray-900 mb-4">Episodios Destacados</h3>
+                        <p className="text-lg text-gray-600">Los últimos capítulos publicados por nuestros creadores</p>
+                    </div>
+
+                    {featuredEpisodes.length === 0 ? (
+                        <div className="text-center py-16">
+                            <Icon name="image" className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                            <h4 className="text-xl font-semibold text-gray-600 mb-2">No hay episodios publicados aún</h4>
+                            <p className="text-gray-500">¡Sé el primero en crear una historia increíble!</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+                            {featuredEpisodes.map((episode) => (
+                                <div
+                                    key={episode.id}
+                                    className="bg-white rounded-xl shadow-md hover:shadow-xl transition-shadow duration-300 overflow-hidden group cursor-pointer"
+                                    onClick={() => onSelectEpisode(episode.id)}
+                                >
+                                    {/* Episode Preview Image */}
+                                    <div className="aspect-w-16 aspect-h-9 bg-gray-200 overflow-hidden">
+                                        {episode.previewImage ? (
+                                            <img
+                                                src={episode.previewImage}
+                                                alt={`Preview de ${episode.title}`}
+                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200">
+                                                <Icon name="image" className="w-12 h-12 text-gray-400" />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Episode Info */}
+                                    <div className="p-6">
+                                        <h4 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2">
+                                            {episode.title}
+                                        </h4>
+
+                                        {episode.series && (
+                                            <p className="text-sm text-indigo-600 font-medium mb-3">
+                                                de "{episode.series.title}"
+                                            </p>
+                                        )}
+
+                                        <p className="text-sm text-gray-500 mb-4">
+                                            {formatDate(episode.createdAt)}
+                                        </p>
+
+                                        <button
+                                            className="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const shareUrl = `${window.location.origin}${window.location.pathname}?view=${episode.id}`;
+                                                window.location.href = shareUrl;
+                                            }}
+                                        >
+                                            <Icon name="book" className="w-4 h-4" />
+                                            Leer Episodio
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            {/* Call to Action */}
+            {!user && (
+                <section className="bg-gray-900 text-white py-16">
+                    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                        <h3 className="text-3xl font-bold mb-6">¿Quieres crear tu propio cómic?</h3>
+                        <p className="text-xl mb-8 text-gray-300">
+                            Únete a nuestra comunidad de creadores y comienza a generar historias increíbles con IA.
+                        </p>
+                        <button
+                            onClick={onShowLogin}
+                            className="bg-indigo-600 text-white px-8 py-3 rounded-lg hover:bg-indigo-700 transition text-lg font-semibold"
+                        >
+                            Comenzar a Crear
+                        </button>
+                    </div>
+                </section>
+            )}
+
+            {/* Footer */}
+            <footer className="bg-gray-50 border-t py-8">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                    <p className="text-gray-600">
+                        © 2025 Coomic. Historias creadas con IA.
+                    </p>
+                </div>
+            </footer>
+        </div>
+    );
+};
 
 // 2. Dashboard (Series List)
 const Dashboard = ({ user, onSelectSeries }) => {
@@ -563,6 +775,19 @@ const SeriesEditor = ({ seriesId, onBack, onSelectEpisode }) => {
         }
     };
 
+    const toggleFeatured = async (episodeId, currentFeatured) => {
+        try {
+            const episodesCollectionPath = `/artifacts/${appId}/public/data/episodes`;
+            const episodeRef = doc(db, episodesCollectionPath, episodeId);
+            await updateDoc(episodeRef, {
+                featured: !currentFeatured
+            });
+        } catch (error) {
+            console.error("Error toggling featured status:", error);
+            alert("Error al cambiar el estado destacado del episodio");
+        }
+    };
+
     const deleteEpisode = async (episodeId) => {
         const panelsCollectionPath = `/artifacts/${appId}/public/data/panels`;
         const episodesCollectionPath = `/artifacts/${appId}/public/data/episodes`;
@@ -729,7 +954,21 @@ const SeriesEditor = ({ seriesId, onBack, onSelectEpisode }) => {
                         {episodes.length === 0 && <p className="text-gray-500">Aún no hay episodios.</p>}
                         {episodes.map(ep => (
                             <div key={ep.id} className="p-4 border rounded-lg bg-gray-50 flex justify-between items-center group">
-                                <span className="font-semibold text-gray-800">{ep.title}</span>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => toggleFeatured(ep.id, ep.featured || false)}
+                                        className={`p-1 rounded ${ep.featured ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-yellow-500'} transition-colors`}
+                                        title={ep.featured ? 'Quitar de destacados' : 'Marcar como destacado'}
+                                    >
+                                        <Icon name="wand" className="w-5 h-5" />
+                                    </button>
+                                    <span className="font-semibold text-gray-800">{ep.title}</span>
+                                    {ep.featured && (
+                                        <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
+                                            Destacado
+                                        </span>
+                                    )}
+                                </div>
                                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button onClick={() => onSelectEpisode(ep.id)} className="bg-green-500 text-white px-3 py-1 rounded-md text-sm hover:bg-green-600">Editar</button>
                                     <button onClick={() => deleteEpisode(ep.id)} className="text-gray-500 hover:text-red-600"><Icon name="trash" className="w-5 h-5"/></button>
@@ -1254,7 +1493,7 @@ const Login = ({ onLogin }) => {
         <div className="min-h-screen bg-gray-100 flex items-center justify-center">
             <div className="w-full max-w-md p-8 bg-white rounded-xl shadow-lg">
                 <div className="text-center mb-8">
-                    <h1 className="text-3xl font-bold text-gray-800">Comic AI Editor</h1>
+                    <h1 className="text-3xl font-bold text-gray-800">Coomic</h1>
                     <p className="text-gray-600 mt-2">Inicia sesión para continuar</p>
                 </div>
 
@@ -1312,9 +1551,10 @@ const Login = ({ onLogin }) => {
 // --- Main App Component ---
 function App() {
     const { user, loading } = useAuth();
-    const [view, setView] = useState('dashboard'); // dashboard, series, episode
+    const [view, setView] = useState('landing'); // landing, dashboard, series, episode
     const [selectedSeriesId, setSelectedSeriesId] = useState(null);
     const [selectedEpisodeId, setSelectedEpisodeId] = useState(null);
+    const [showLogin, setShowLogin] = useState(false);
 
     // Check for public view URL parameter
     const urlParams = new URLSearchParams(window.location.search);
@@ -1328,15 +1568,11 @@ function App() {
         return <div className="w-screen h-screen flex items-center justify-center"><LoadingSpinner size="lg" /></div>;
     }
 
-    if (!user) {
-        return <Login onLogin={() => {}} />;
-    }
-    
     const handleSelectSeries = (seriesId) => {
         setSelectedSeriesId(seriesId);
         setView('series');
     };
-    
+
     const handleSelectEpisode = (episodeId) => {
         setSelectedEpisodeId(episodeId);
         setView('episode');
@@ -1352,6 +1588,29 @@ function App() {
         }
     };
 
+    const handleGoToDashboard = () => {
+        setView('dashboard');
+        setSelectedSeriesId(null);
+        setSelectedEpisodeId(null);
+    };
+
+    const handleShowLogin = () => {
+        setShowLogin(true);
+    };
+
+    const handleLoginSuccess = () => {
+        setShowLogin(false);
+        setView('dashboard');
+    };
+
+    if (showLogin) {
+        return <Login onLogin={handleLoginSuccess} />;
+    }
+
+    if (!user) {
+        return <LandingPage user={null} onSelectEpisode={handleSelectEpisode} onGoToDashboard={handleGoToDashboard} onShowLogin={handleShowLogin} />;
+    }
+
     const renderContent = () => {
         switch (view) {
             case 'series':
@@ -1359,8 +1618,10 @@ function App() {
             case 'episode':
                 return <EpisodeEditor seriesId={selectedSeriesId} episodeId={selectedEpisodeId} onBack={navigateBack} />;
             case 'dashboard':
-            default:
                 return <Dashboard user={user} onSelectSeries={handleSelectSeries} />;
+            case 'landing':
+            default:
+                return <LandingPage user={user} onSelectEpisode={handleSelectEpisode} onGoToDashboard={handleGoToDashboard} />;
         }
     };
     
